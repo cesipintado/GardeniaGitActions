@@ -1,0 +1,68 @@
+# .github/workflows/deploy.yml
+# 🚀 Pipeline de CI/CD para despliegue local con un Self-Hosted Runner
+
+name: Deploy Locally with Self-Hosted Runner
+
+on:
+  push:
+    branches: [ "master" ]
+  workflow_dispatch: # Permite ejecutar el pipeline manualmente
+
+env:
+  DOCKER_PROJECT_NAME: 'gardenia_project'
+  APP_CONTAINER_NAME: 'gardenia_app'
+  DB_CONTAINER_NAME: 'mysql-gardenia-prod'
+  DB_NAME: 'gardenia'
+  DB_USER: 'root'
+  DB_PASSWORD: '202100067'
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy Locally
+    runs-on: self-hosted
+
+    steps:
+      # 1. Descargar el código del repositorio en el runner
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Configurar Java y Maven
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      # 3. Compilar el proyecto
+      - name: Build with Maven
+        run: mvn -B clean package -DskipTests
+
+      # 4. Desplegar usando Docker Compose
+      - name: Deploy with Docker Compose
+        run: |
+          echo "✅ Iniciando despliegue en el runner local..."
+
+          # 1️⃣ Limpiar despliegues anteriores
+          echo "🧹 Limpiando despliegue anterior (si existe)..."
+          docker compose -p ${{ env.DOCKER_PROJECT_NAME }} down -v --remove-orphans || echo "⚠️ No se encontró un despliegue anterior."
+
+          # 2️⃣ Levantar servicios
+          echo "🏗️ Construyendo y levantando los servicios..."
+          docker compose -p ${{ env.DOCKER_PROJECT_NAME }} up -d --build
+
+          # 3️⃣ Esperar que la DB esté lista
+          echo "⏳ Esperando 30 segundos para que la DB se estabilice..."
+          sleep 30
+
+          echo "💾 Inicializando base de datos desde init.sql..."
+          cat ./sql/init.sql | docker exec -i ${{ env.DB_CONTAINER_NAME }} mysql -u${{ env.DB_USER }} -p${{ env.DB_PASSWORD }} ${{ env.DB_NAME }}
+
+          # 4️⃣ Verificar el estado
+          echo "🔍 Verificando estado de los contenedores..."
+          docker compose -p ${{ env.DOCKER_PROJECT_NAME }} ps
+
+          echo "🗒️ Últimos logs de la aplicación:"
+          docker logs --tail 100 ${{ env.APP_CONTAINER_NAME }}
+
+          echo "🎉 ✓ Despliegue local completado exitosamente."
